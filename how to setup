@@ -1,0 +1,206 @@
+✅ STEP 0: Prerequisites
+
+AlmaLinux 8/9
+
+Root or sudo user
+
+Fresh system (LEMP removed already)
+
+✅ STEP 1: Update system
+sudo dnf update -y
+
+✅ STEP 2: Install NGINX
+sudo dnf install -y nginx
+sudo systemctl enable nginx
+sudo systemctl start nginx
+
+
+Test:
+
+curl http://localhost
+
+
+You should see NGINX default page.
+
+✅ STEP 3: Install PHP (with WordPress requirements)
+sudo dnf install -y \
+php php-fpm php-mysqlnd php-cli php-common \
+php-gd php-xml php-mbstring php-json php-opcache php-curl php-zip
+
+🔴 CRITICAL: Fix PHP-FPM socket (most common failure)
+
+Edit:
+
+sudo vi /etc/php-fpm.d/www.conf
+
+
+Set exactly:
+
+user = nginx
+group = nginx
+
+listen = /run/php-fpm/www.sock
+listen.owner = nginx
+listen.group = nginx
+listen.mode = 0660
+
+
+Start PHP:
+
+sudo systemctl enable php-fpm
+sudo systemctl start php-fpm
+
+
+Verify:
+
+ls -l /run/php-fpm/www.sock
+
+
+Owner must be nginx:nginx
+
+✅ STEP 4: Install MariaDB
+sudo dnf install -y mariadb mariadb-server
+sudo systemctl enable mariadb
+sudo systemctl start mariadb
+
+
+Secure it:
+
+sudo mariadb-secure-installation
+
+
+Choose:
+
+Set root password → Yes
+
+Remove anonymous users → Yes
+
+Disallow remote root login → Yes
+
+Remove test DB → Yes
+
+Reload privileges → Yes
+
+✅ STEP 5: Create WordPress database
+sudo mariadb
+
+CREATE DATABASE wordpress
+  DEFAULT CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+
+CREATE USER 'wuser'@'localhost'
+IDENTIFIED BY 'wpass';
+
+GRANT ALL PRIVILEGES ON wordpress.* TO 'wuser'@'localhost';
+FLUSH PRIVILEGES;
+EXIT;
+
+
+Test:
+
+mariadb -u wuser -p wordpress
+
+✅ STEP 6: Download WordPress
+cd /var/www/html
+sudo wget https://wordpress.org/latest.tar.gz
+sudo tar -xzf latest.tar.gz
+sudo rm -f latest.tar.gz
+
+
+Permissions:
+
+sudo chown -R nginx:nginx /var/www/html/wordpress
+sudo find /var/www/html/wordpress -type d -exec chmod 755 {} \;
+sudo find /var/www/html/wordpress -type f -exec chmod 644 {} \;
+
+✅ STEP 7: NGINX virtual host (WordPress)
+
+Create config:
+
+sudo vi /etc/nginx/conf.d/wordpress.conf
+
+
+Paste:
+
+server {
+    listen 80;
+    server_name _;
+    root /var/www/html/wordpress;
+    index index.php index.html;
+
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+
+    location ~ \.php$ {
+        try_files $uri =404;
+        include fastcgi.conf;
+        fastcgi_pass unix:/run/php-fpm/www.sock;
+    }
+
+    location ~ /\.(?!well-known).* {
+        deny all;
+    }
+}
+
+
+Test & reload:
+
+sudo nginx -t
+sudo systemctl reload nginx
+
+✅ STEP 8: WordPress config file
+cd /var/www/html/wordpress
+sudo cp wp-config-sample.php wp-config.php
+sudo vi wp-config.php
+
+
+Set:
+
+define( 'DB_NAME', 'wordpress' );
+define( 'DB_USER', 'wuser' );
+define( 'DB_PASSWORD', 'wpass' );
+define( 'DB_HOST', 'localhost' );
+
+
+Fix permissions:
+
+sudo chown nginx:nginx wp-config.php
+sudo chmod 640 wp-config.php
+
+✅ STEP 9: SELinux (MANDATORY on AlmaLinux)
+sudo setsebool -P httpd_can_network_connect_db 1
+sudo chcon -R -t httpd_sys_content_t /var/www/html/wordpress
+
+✅ STEP 10: Restart everything
+sudo systemctl restart mariadb php-fpm
+sudo systemctl reload nginx
+
+✅ STEP 11: Finish WordPress install
+
+Open browser:
+
+http://SERVER_IP/
+
+
+You should see WordPress installation page 🎉
+
+🧠 MACHINE-TEST CHECKLIST (MEMORIZE THIS)
+
+NGINX running
+
+PHP executes (phpinfo())
+
+PHP-FPM socket owned by nginx
+
+php-mysqlnd installed
+
+MariaDB running
+
+DB + user exists
+
+wp-config.php correct
+
+SELinux boolean enabled
+
+If you remember these → you will pass.
